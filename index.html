@@ -30,6 +30,7 @@
 
   <!-- Firebase CDNs (compat format for standalone script tag usage) -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <!-- CSS Custom styles for animations -->
@@ -74,6 +75,16 @@
       firebase.initializeApp(firebaseConfig);
     }
     const db = firebase.app().firestore(firebaseConfig.firestoreDatabaseId || '(default)');
+    const auth = firebase.auth();
+
+    // Iniciar sesión anónima automáticamente (invisible al usuario)
+    let firebaseUid = null;
+    const authReady = auth.signInAnonymously().then(() => {
+      firebaseUid = auth.currentUser?.uid || null;
+      console.log("Firebase Auth OK. UID anónimo:", firebaseUid);
+    }).catch(err => {
+      console.error("Error en Firebase Auth anónimo:", err);
+    });
 
     // Enums and Constants
     const Frequency = {
@@ -321,19 +332,24 @@
         return () => window.removeEventListener('beforeinstallprompt', handler);
       }, []);
 
-      // Cargar e Inicializar base de datos Firestore en Tiempo Real
+      // Cargar e Inicializar base de datos Firestore en Tiempo Real (espera auth)
       useEffect(() => {
-        const unsubscribe = db.collection('rounds').onSnapshot((snapshot) => {
-          const serverRounds = [];
-          snapshot.forEach(doc => {
-            serverRounds.push({ id: doc.id, ...doc.data() });
+        let unsubscribe = null;
+        
+        authReady.then(() => {
+          unsubscribe = db.collection('rounds').onSnapshot((snapshot) => {
+            const serverRounds = [];
+            snapshot.forEach(doc => {
+              serverRounds.push({ id: doc.id, ...doc.data() });
+            });
+            setRounds(serverRounds);
+            localStorage.setItem('sams_rounds_data', JSON.stringify(serverRounds));
+          }, (err) => {
+            console.error("Error cargando de Firestore:", err);
           });
-          setRounds(serverRounds);
-          localStorage.setItem('sams_rounds_data', JSON.stringify(serverRounds));
-        }, (err) => {
-          console.error("Error cargando de Firestore:", err);
         });
-        return () => unsubscribe();
+
+        return () => { if (unsubscribe) unsubscribe(); };
       }, []);
 
       // Load user profile & handle initial URL routing on mount
@@ -354,21 +370,28 @@
         }
         setRounds(initialRounds);
 
-        // Auto-sanación: al cargar, resincronizar rondas locales que falten en Firestore
-        db.collection('rounds').get().then((snapshot) => {
-          const serverIds = [];
-          snapshot.forEach(doc => serverIds.push(doc.id));
-          
-          initialRounds.forEach(localRound => {
-            if (localRound && localRound.id && localRound.id !== 'demo-round-1') {
-              if (!serverIds.includes(localRound.id)) {
-                console.log("Subiendo ronda local faltante a Firestore:", localRound.name);
-                db.collection('rounds').doc(localRound.id).set(localRound);
+        // Esperar auth y luego sincronizar con Firestore
+        authReady.then(() => {
+          // Auto-sanación: subir rondas locales faltantes
+          db.collection('rounds').get().then((snapshot) => {
+            const serverIds = [];
+            snapshot.forEach(doc => serverIds.push(doc.id));
+            
+            initialRounds.forEach(localRound => {
+              if (localRound && localRound.id && localRound.id !== 'demo-round-1') {
+                if (!serverIds.includes(localRound.id)) {
+                  console.log("Subiendo ronda local faltante a Firestore:", localRound.name);
+                  const uid = auth.currentUser?.uid || null;
+                  const roundData = { ...localRound };
+                  if (!roundData.userId && uid) roundData.userId = uid;
+                  if (!roundData.participantIds) roundData.participantIds = uid ? [uid] : [];
+                  db.collection('rounds').doc(localRound.id).set(roundData);
+                }
               }
-            }
+            });
           });
 
-          // Enrutamiento de link si viene con roundId
+          // Enrutamiento de link con ?roundId=
           if (roundIdParam) {
             db.collection('rounds').doc(roundIdParam).get().then((docSnap) => {
               if (docSnap.exists) {
@@ -386,12 +409,16 @@
                     setView('import');
                   }
                 } else {
-                  setSelectedRoundId(foundRound.id);
-                  setView('details');
+                  // Sam activo/completado - mostrar directamente
+                  setImportedRound(foundRound);
+                  setView('import');
                 }
               } else {
-                alert("El Sam especificado no existe o fue eliminado de Firestore.");
+                alert("El Sam especificado no existe o fue eliminado.");
               }
+            }).catch(err => {
+              console.error("Error buscando ronda en Firestore:", err);
+              alert("Error conectando con la base de datos. Intenta de nuevo.");
             });
           }
         });
@@ -427,7 +454,15 @@
 
       // Guardar localmente y sincronizar a Firestore (sin sobrescribir las demás)
       const syncRoundToServer = (round) => {
-        db.collection('rounds').doc(round.id).set(round, { merge: true })
+        const uid = auth.currentUser?.uid || null;
+        const roundData = { ...round };
+        // Asegurar que tenga userId y participantIds para las reglas de Firestore
+        if (!roundData.userId && uid) roundData.userId = uid;
+        if (!roundData.participantIds) roundData.participantIds = [];
+        if (uid && !roundData.participantIds.includes(uid)) {
+          roundData.participantIds.push(uid);
+        }
+        db.collection('rounds').doc(round.id).set(roundData, { merge: true })
           .catch(err => console.error("Error sincronizando ronda a Firestore:", err));
       };
 
