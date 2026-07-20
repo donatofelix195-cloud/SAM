@@ -83,7 +83,9 @@
       firebaseUid = auth.currentUser?.uid || null;
       console.log("Firebase Auth OK. UID anónimo:", firebaseUid);
     }).catch(err => {
-      console.error("Error en Firebase Auth anónimo:", err);
+      console.warn("Error en Firebase Auth anónimo (continuando con acceso sin auth):", err);
+      // Resolvemos el flujo para que intente conectar por si las reglas son públicas
+      return Promise.resolve();
     });
 
     // Enums and Constants
