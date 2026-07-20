@@ -1,0 +1,2374 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Gestor de Sams y Tandas</title>
+  
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Outfit', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- React CDNs -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase CDNs (compat format for standalone script tag usage) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <!-- CSS Custom styles for animations -->
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: rgb(248, 250, 252);
+    }
+    .font-display {
+      font-family: 'Outfit', sans-serif;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.5; }
+      50% { transform: scale(1.1); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.5; }
+    }
+    .animate-pulse-ring {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Firebase Config (for GitHub Pages serverless sync)
+    const firebaseConfig = {
+      projectId: "boxwood-reflection-vdw77",
+      appId: "1:313199429078:web:52a608452af526f0269077",
+      apiKey: "AIzaSyCWdVix1cpkkTrloN47TirUXRdBIU-BHhw",
+      authDomain: "boxwood-reflection-vdw77.firebaseapp.com",
+      firestoreDatabaseId: "ai-studio-gestordesamsytan-2e49a1d3-fd07-4f4f-93a3-1fd9166354ab",
+      storageBucket: "boxwood-reflection-vdw77.firebasestorage.app",
+      messagingSenderId: "313199429078",
+      measurementId: "",
+      oAuthClientId: "313199429078-8j9bt4nlvncnhqkabv4jjugj09632ke2.apps.googleusercontent.com"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.app().firestore(firebaseConfig.firestoreDatabaseId || '(default)');
+
+    // Enums and Constants
+    const Frequency = {
+      WEEKLY: 'Semanal',
+      BIWEEKLY: 'Quincenal',
+      MONTHLY: 'Mensual'
+    };
+
+    const RoundStatus = {
+      DRAFT: 'Borrador',
+      ACTIVE: 'Activa',
+      COMPLETED: 'Completada'
+    };
+
+    const DEMO_ROUND = {
+      id: 'demo-round-1',
+      name: 'Bolso Quincenal Oficina (Demo)',
+      totalAmount: 5000,
+      contributionPerTicket: 1000,
+      frequency: Frequency.BIWEEKLY,
+      startDate: '2026-07-15',
+      status: RoundStatus.ACTIVE,
+      createdAt: new Date().toISOString(),
+      participants: [
+        { id: 'dp-1', name: 'Organizador (Tú)', ticketsCount: 1 },
+        { id: 'dp-2', name: 'Laura Mendoza', ticketsCount: 1 },
+        { id: 'dp-3', name: 'Ricardo Salas', ticketsCount: 1 },
+        { id: 'dp-4', name: 'Gabriela Díaz', ticketsCount: 1 },
+        { id: 'dp-5', name: 'Héctor Soto', ticketsCount: 1 },
+      ],
+      tickets: [
+        { id: 'dt-1', number: 1, participantId: 'dp-1', participantName: 'Organizador (Tú)' },
+        { id: 'dt-2', number: 2, participantId: 'dp-3', participantName: 'Ricardo Salas' },
+        { id: 'dt-3', number: 3, participantId: 'dp-2', participantName: 'Laura Mendoza' },
+        { id: 'dt-4', number: 4, participantId: 'dp-5', participantName: 'Héctor Soto' },
+        { id: 'dt-5', number: 5, participantId: 'dp-4', participantName: 'Gabriela Díaz' },
+      ],
+      periods: [
+        { number: 1, paymentDate: '2026-07-15', beneficiaryTicketId: 'dt-1', beneficiaryName: 'Organizador (Tú)', isPayoutDelivered: true },
+        { number: 2, paymentDate: '2026-07-30', beneficiaryTicketId: 'dt-2', beneficiaryName: 'Ricardo Salas', isPayoutDelivered: true },
+        { number: 3, paymentDate: '2026-08-14', beneficiaryTicketId: 'dt-3', beneficiaryName: 'Laura Mendoza', isPayoutDelivered: false },
+        { number: 4, paymentDate: '2026-08-29', beneficiaryTicketId: 'dt-4', beneficiaryName: 'Héctor Soto', isPayoutDelivered: false },
+        { number: 5, paymentDate: '2026-09-13', beneficiaryTicketId: 'dt-5', beneficiaryName: 'Gabriela Díaz', isPayoutDelivered: false },
+      ],
+      payments: [
+        // Period 1
+        { id: 'dpay-1-1', periodNumber: 1, ticketId: 'dt-1', participantId: 'dp-1', participantName: 'Organizador (Tú)', amount: 1000, isPaid: true },
+        { id: 'dpay-1-2', periodNumber: 1, ticketId: 'dt-2', participantId: 'dp-3', participantName: 'Ricardo Salas', amount: 1000, isPaid: true },
+        { id: 'dpay-1-3', periodNumber: 1, ticketId: 'dt-3', participantId: 'dp-2', participantName: 'Laura Mendoza', amount: 1000, isPaid: true },
+        { id: 'dpay-1-4', periodNumber: 1, ticketId: 'dt-4', participantId: 'dp-5', participantName: 'Héctor Soto', amount: 1000, isPaid: true },
+        { id: 'dpay-1-5', periodNumber: 1, ticketId: 'dt-5', participantId: 'dp-4', participantName: 'Gabriela Díaz', amount: 1000, isPaid: true },
+        // Period 2
+        { id: 'dpay-2-1', periodNumber: 2, ticketId: 'dt-1', participantId: 'dp-1', participantName: 'Organizador (Tú)', amount: 1000, isPaid: true },
+        { id: 'dpay-2-2', periodNumber: 2, ticketId: 'dt-2', participantId: 'dp-3', participantName: 'Ricardo Salas', amount: 1000, isPaid: true },
+        { id: 'dpay-2-3', periodNumber: 2, ticketId: 'dt-3', participantId: 'dp-2', participantName: 'Laura Mendoza', amount: 1000, isPaid: true },
+        { id: 'dpay-2-4', periodNumber: 2, ticketId: 'dt-4', participantId: 'dp-5', participantName: 'Héctor Soto', amount: 1000, isPaid: true },
+        { id: 'dpay-2-5', periodNumber: 2, ticketId: 'dt-5', participantId: 'dp-4', participantName: 'Gabriela Díaz', amount: 1000, isPaid: true },
+        // Period 3
+        { id: 'dpay-3-1', periodNumber: 3, ticketId: 'dt-1', participantId: 'dp-1', participantName: 'Organizador (Tú)', amount: 1000, isPaid: true },
+        { id: 'dpay-3-2', periodNumber: 3, ticketId: 'dt-2', participantId: 'dp-3', participantName: 'Ricardo Salas', amount: 1000, isPaid: true },
+        { id: 'dpay-3-3', periodNumber: 3, ticketId: 'dt-3', participantId: 'dp-2', participantName: 'Laura Mendoza', amount: 1000, isPaid: false },
+        { id: 'dpay-3-4', periodNumber: 3, ticketId: 'dt-4', participantId: 'dp-5', participantName: 'Héctor Soto', amount: 1000, isPaid: false },
+        { id: 'dpay-3-5', periodNumber: 3, ticketId: 'dt-5', participantId: 'dp-4', participantName: 'Gabriela Díaz', amount: 1000, isPaid: false },
+        // Period 4
+        { id: 'dpay-4-1', periodNumber: 4, ticketId: 'dt-1', participantId: 'dp-1', participantName: 'Organizador (Tú)', amount: 1000, isPaid: false },
+        { id: 'dpay-4-2', periodNumber: 4, ticketId: 'dt-2', participantId: 'dp-3', participantName: 'Ricardo Salas', amount: 1000, isPaid: false },
+        { id: 'dpay-4-3', periodNumber: 4, ticketId: 'dt-3', participantId: 'dp-2', participantName: 'Laura Mendoza', amount: 1000, isPaid: false },
+        { id: 'dpay-4-4', periodNumber: 4, ticketId: 'dt-4', participantId: 'dp-5', participantName: 'Héctor Soto', amount: 1000, isPaid: false },
+        { id: 'dpay-4-5', periodNumber: 4, ticketId: 'dt-5', participantId: 'dp-4', participantName: 'Gabriela Díaz', amount: 1000, isPaid: false },
+        // Period 5
+        { id: 'dpay-5-1', periodNumber: 5, ticketId: 'dt-1', participantId: 'dp-1', participantName: 'Organizador (Tú)', amount: 1000, isPaid: false },
+        { id: 'dpay-5-2', periodNumber: 5, ticketId: 'dt-2', participantId: 'dp-3', participantName: 'Ricardo Salas', amount: 1000, isPaid: false },
+        { id: 'dpay-5-3', periodNumber: 5, ticketId: 'dt-3', participantId: 'dp-2', participantName: 'Laura Mendoza', amount: 1000, isPaid: false },
+        { id: 'dpay-5-4', periodNumber: 5, ticketId: 'dt-4', participantId: 'dp-5', participantName: 'Héctor Soto', amount: 1000, isPaid: false },
+        { id: 'dpay-5-5', periodNumber: 5, ticketId: 'dt-5', participantId: 'dp-4', participantName: 'Gabriela Díaz', amount: 1000, isPaid: false },
+      ]
+    };
+
+    // Date Utilities
+    function generatePaymentDates(startDateStr, frequency, count, paymentDay1, paymentDay2) {
+      const dates = [];
+      const baseDate = new Date(startDateStr + 'T12:00:00');
+
+      function getSafeDate(year, month, day) {
+        const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+        const safeDay = Math.min(day, lastDayOfMonth);
+        return new Date(year, month, safeDay, 12, 0, 0);
+      }
+
+      if (frequency === Frequency.MONTHLY && paymentDay1 !== undefined && paymentDay1 !== null) {
+        let startYear = baseDate.getFullYear();
+        let startMonth = baseDate.getMonth();
+        const targetDay = parseInt(paymentDay1);
+
+        let firstDate = getSafeDate(startYear, startMonth, targetDay);
+        if (firstDate.getTime() < baseDate.getTime()) {
+          startMonth += 1;
+        }
+
+        for (let i = 0; i < count; i++) {
+          const currentDate = getSafeDate(startYear, startMonth + i, targetDay);
+          const yyyy = currentDate.getFullYear();
+          const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+          const dd = String(currentDate.getDate()).padStart(2, '0');
+          dates.push(`${yyyy}-${mm}-${dd}`);
+        }
+        return dates;
+      }
+
+      if (frequency === Frequency.BIWEEKLY && paymentDay1 !== undefined && paymentDay2 !== undefined && paymentDay1 !== null && paymentDay2 !== null) {
+        let startYear = baseDate.getFullYear();
+        let startMonth = baseDate.getMonth();
+        
+        const day1 = Math.min(parseInt(paymentDay1), parseInt(paymentDay2));
+        const day2 = Math.max(parseInt(paymentDay1), parseInt(paymentDay2));
+
+        let candA = getSafeDate(startYear, startMonth, day1);
+        let candB = getSafeDate(startYear, startMonth, day2);
+
+        let useDay2 = false;
+        let curMonth = startMonth;
+        let curYear = startYear;
+
+        if (baseDate.getTime() <= candA.getTime()) {
+          useDay2 = false;
+        } else if (baseDate.getTime() <= candB.getTime()) {
+          useDay2 = true;
+        } else {
+          curMonth += 1;
+          useDay2 = false;
+        }
+
+        for (let i = 0; i < count; i++) {
+          const targetDay = useDay2 ? day2 : day1;
+          const currentDate = getSafeDate(curYear, curMonth, targetDay);
+          const yyyy = currentDate.getFullYear();
+          const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+          const dd = String(currentDate.getDate()).padStart(2, '0');
+          dates.push(`${yyyy}-${mm}-${dd}`);
+
+          if (useDay2) {
+            curMonth += 1;
+            useDay2 = false;
+          } else {
+            useDay2 = true;
+          }
+        }
+        return dates;
+      }
+
+      for (let i = 0; i < count; i++) {
+        const currentDate = new Date(baseDate);
+        if (frequency === Frequency.WEEKLY) {
+          currentDate.setDate(baseDate.getDate() + (i * 7));
+        } else if (frequency === Frequency.BIWEEKLY) {
+          currentDate.setDate(baseDate.getDate() + (i * 15));
+        } else if (frequency === Frequency.MONTHLY) {
+          currentDate.setMonth(baseDate.getMonth() + i);
+        }
+        
+        const yyyy = currentDate.getFullYear();
+        const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(currentDate.getDate()).padStart(2, '0');
+        dates.push(`${yyyy}-${mm}-${dd}`);
+      }
+      return dates;
+    }
+
+    function formatLocalDate(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr + 'T12:00:00');
+      const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      const formatted = date.toLocaleDateString('es-ES', options);
+      return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    }
+
+    function formatLocalDateShort(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr + 'T12:00:00');
+      const options = { year: 'numeric', month: 'short', day: 'numeric' };
+      return date.toLocaleDateString('es-ES', options);
+    }
+
+    // Common Icon component supporting essential Lucide layouts
+    function Icon({ name, className = 'w-5 h-5' }) {
+      const paths = {
+        Plus: <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />,
+        Trash2: <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />,
+        Calendar: <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />,
+        DollarSign: <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+        Users: <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.109A11.386 11.386 0 0 1 8.625 21c-2.22 0-4.307-.63-6.074-1.723v-.109A12.188 12.188 0 0 1 8.625 18c2.255 0 4.364.612 6.185 1.681ZM20.25 8.005a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-10.5 2.25a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0ZM13.5 7.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />,
+        CheckCircle: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+        Clock: <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+        TrendingUp: <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18 9 11.25l4.306 4.306a11.95 11.95 0 0 1 5.814-5.518l2.74-1.22m0 0-5.94-2.281m5.94 2.28-2.28 5.941" />,
+        Download: <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />,
+        Upload: <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />,
+        HelpCircle: <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />,
+        Coins: <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 3.333a2.25 2.25 0 01-2.208 1.834H6.583a2.25 2.25 0 01-2.208-1.834L3.75 7.5m16.5 0H3.75m16.5 0a2.25 2.25 0 00-2.25-2.25H6a2.25 2.25 0 00-2.25 2.25m16.5 0v3.75a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 13.5V7.5" />,
+        Heart: <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z" />,
+        Info: <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 111.086.796l-1.087 1.087a.75.75 0 001.086 1.087l1.086-1.086a2.25 2.25 0 00-3.181-3.182l-.02.022M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
+        BookOpen: <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />,
+        AlertCircle: <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />,
+        LogOut: <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />,
+        Edit2: <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.83 17.013a4.5 4.5 0 0 1-1.897 1.13l-2.585.834.834-2.585a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487zm0 0L19.5 7.125" />,
+        ChevronRight: <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />,
+        ArrowLeft: <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />,
+        ArrowRight: <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />,
+        Award: <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 0 1 3 3h-15a3 3 0 0 1 3-3m9 0v-3.375c0-.621-.504-1.125-1.125-1.125h-.375M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.375m9 0A3.375 3.375 0 0 1 21 12c0-1.865-1.51-3.375-3.375-3.375h-.375m-9.75 0A3.375 3.375 0 0 0 4.5 12c0 1.865 1.51 3.375 3.375 3.375h.375m9.75-6V7.875c0-.621-.504-1.125-1.125-1.125H8.625c-.621 0-1.125.504-1.125 1.125v.75m9.75-3V4.5c0-.621-.504-1.125-1.125-1.125H8.625C8.004 3.375 7.5 3.879 7.5 4.5v1.125m9.75 0v3.75m-9.75-3.75v3.75" />,
+        Check: <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />,
+        X: <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />,
+        Star: <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499c.195-.558 1.045-.558 1.24 0l1.838 5.257h5.525c.594 0 .842.772.362 1.143l-4.471 3.447 1.708 4.795c.196.551-.432 1.01-1.026.68l-4.472-2.486-4.472 2.486c-.594.33-1.222-.129-1.026-.68l1.708-4.795-4.471-3.447c-.48-.37-.232-1.143.362-1.143h5.525L11.48 3.5Z" />,
+        Share2: <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186.002-.003.001-.002a2.25 2.25 0 0 1 3.097-2.658l5.249 3.003c.895.512 1.436 1.47 1.436 2.502v.004c0 1.03-.54 1.99-1.436 2.502l-5.25 3.003a2.25 2.25 0 1 1-3.1-2.661l5.248-3.002" />,
+        Shuffle: <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />,
+        Play: <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347c-.75.412-1.667-.13-1.667-.986V5.653Z" />,
+        RotateCcw: <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+      };
+
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={className}>
+          {paths[name] || <path d="M12 9v3m0 0v3m0-3h3m-3 0H9" />}
+        </svg>
+      );
+    }
+
+    // App Main Component
+    function App() {
+      const [rounds, setRounds] = useState([]);
+      const [selectedRoundId, setSelectedRoundId] = useState(null);
+      const [view, setView] = useState('list');
+      const [draftRound, setDraftRound] = useState(null);
+      const [showExplanation, setShowExplanation] = useState(false);
+      const [localUser, setLocalUser] = useState({ name: 'Organizador (Tú)' });
+
+      // Sharing states
+      const [importedRound, setImportedRound] = useState(null);
+      const [installPrompt, setInstallPrompt] = useState(null);
+
+      // Listen for PWA installation prompt
+      useEffect(() => {
+        const handler = (e) => {
+          e.preventDefault();
+          setInstallPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+      }, []);
+
+      // Cargar e Inicializar base de datos Firestore en Tiempo Real
+      useEffect(() => {
+        const unsubscribe = db.collection('rounds').onSnapshot((snapshot) => {
+          const serverRounds = [];
+          snapshot.forEach(doc => {
+            serverRounds.push({ id: doc.id, ...doc.data() });
+          });
+          setRounds(serverRounds);
+          localStorage.setItem('sams_rounds_data', JSON.stringify(serverRounds));
+        }, (err) => {
+          console.error("Error cargando de Firestore:", err);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      // Load user profile & handle initial URL routing on mount
+      useEffect(() => {
+        const savedUser = localStorage.getItem('sams_user_profile');
+        if (savedUser) {
+          try { setLocalUser(JSON.parse(savedUser)); } catch(e) {}
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const roundIdParam = params.get('roundId');
+
+        // Cargar caché local primero para velocidad
+        const savedRounds = localStorage.getItem('sams_rounds_data');
+        let initialRounds = [DEMO_ROUND];
+        if (savedRounds) {
+          try { initialRounds = JSON.parse(savedRounds); } catch (e) {}
+        }
+        setRounds(initialRounds);
+
+        // Auto-sanación: al cargar, resincronizar rondas locales que falten en Firestore
+        db.collection('rounds').get().then((snapshot) => {
+          const serverIds = [];
+          snapshot.forEach(doc => serverIds.push(doc.id));
+          
+          initialRounds.forEach(localRound => {
+            if (localRound && localRound.id && localRound.id !== 'demo-round-1') {
+              if (!serverIds.includes(localRound.id)) {
+                console.log("Subiendo ronda local faltante a Firestore:", localRound.name);
+                db.collection('rounds').doc(localRound.id).set(localRound);
+              }
+            }
+          });
+
+          // Enrutamiento de link si viene con roundId
+          if (roundIdParam) {
+            db.collection('rounds').doc(roundIdParam).get().then((docSnap) => {
+              if (docSnap.exists) {
+                const foundRound = { id: docSnap.id, ...docSnap.data() };
+                if (foundRound.status === RoundStatus.DRAFT) {
+                  const savedUserProfile = savedUser ? JSON.parse(savedUser) : null;
+                  const userName = savedUserProfile ? savedUserProfile.name : '';
+                  const userExists = foundRound.participants?.some(p => p.name.trim().toLowerCase() === userName.trim().toLowerCase());
+                  
+                  if (userExists) {
+                    setDraftRound(foundRound);
+                    setView('raffle');
+                  } else {
+                    setImportedRound(foundRound);
+                    setView('import');
+                  }
+                } else {
+                  setSelectedRoundId(foundRound.id);
+                  setView('details');
+                }
+              } else {
+                alert("El Sam especificado no existe o fue eliminado de Firestore.");
+              }
+            });
+          }
+        });
+
+        // Detección legacy import (?import=)
+        const importData = params.get('import');
+        if (importData) {
+          try {
+            const decoded = JSON.parse(decodeURIComponent(escape(atob(importData))));
+            setImportedRound(decoded);
+            setView('import');
+          } catch(e) {
+            console.error("Error decoding imported round", e);
+          }
+        }
+      }, []);
+
+      // Sincronizar el borrador actual (draftRound) si cambia en el servidor
+      useEffect(() => {
+        if (draftRound) {
+          const updated = rounds.find(r => r.id === draftRound.id);
+          if (updated) {
+            if (updated.status !== RoundStatus.DRAFT) {
+              setDraftRound(null);
+              setSelectedRoundId(updated.id);
+              setView('details');
+            } else {
+              setDraftRound(updated);
+            }
+          }
+        }
+      }, [rounds, draftRound?.id]);
+
+      // Guardar localmente y sincronizar a Firestore (sin sobrescribir las demás)
+      const syncRoundToServer = (round) => {
+        db.collection('rounds').doc(round.id).set(round, { merge: true })
+          .catch(err => console.error("Error sincronizando ronda a Firestore:", err));
+      };
+
+      const deleteRoundFromServer = (roundId) => {
+        db.collection('rounds').doc(roundId).delete()
+          .catch(err => console.error("Error eliminando ronda de Firestore:", err));
+      };
+
+      const saveRoundsToStorage = (updatedRounds) => {
+        setRounds(updatedRounds);
+        localStorage.setItem('sams_rounds_data', JSON.stringify(updatedRounds));
+      };
+
+      const handleUpdateProfileName = () => {
+        const newName = prompt("¿Cómo quieres que te llamen en tus Sams? (Introduce tu apodo):", localUser.name);
+        if (newName && newName.trim()) {
+          const profile = { name: newName.trim() };
+          setLocalUser(profile);
+          localStorage.setItem('sams_user_profile', JSON.stringify(profile));
+        }
+      };
+
+      const handleSelectRound = (round) => {
+        if (round.status === RoundStatus.DRAFT) {
+          setDraftRound(round);
+          setView('raffle');
+        } else {
+          setSelectedRoundId(round.id);
+          setView('details');
+        }
+      };
+
+      const handleNewRoundSave = (newRound) => {
+        const updated = [newRound, ...rounds];
+        saveRoundsToStorage(updated);
+        syncRoundToServer(newRound);
+        setDraftRound(newRound);
+        setView('raffle');
+      };
+
+      const handleRaffleComplete = (tickets) => {
+        if (!draftRound) return;
+        const totalTicketsCount = tickets.length;
+
+        // 1. Generate payment dates
+        const paymentDates = generatePaymentDates(
+          draftRound.startDate,
+          draftRound.frequency,
+          totalTicketsCount,
+          draftRound.paymentDay1,
+          draftRound.paymentDay2
+        );
+
+        // 2. Create periods
+        const periods = tickets.map((t, index) => ({
+          number: index + 1,
+          paymentDate: paymentDates[index],
+          beneficiaryTicketId: t.id,
+          beneficiaryName: t.participantName,
+          isPayoutDelivered: false
+        }));
+
+        // 3. Create payments
+        const payments = [];
+        for (let pNum = 1; pNum <= totalTicketsCount; pNum++) {
+          tickets.forEach(ticket => {
+            payments.push({
+              id: `${draftRound.id}-${pNum}-${ticket.id}`,
+              periodNumber: pNum,
+              ticketId: ticket.id,
+              participantId: ticket.participantId,
+              participantName: ticket.participantName,
+              amount: draftRound.contributionPerTicket,
+              isPaid: false
+            });
+          });
+        }
+
+        const activeRound = {
+          ...draftRound,
+          status: RoundStatus.ACTIVE,
+          tickets,
+          periods,
+          payments
+        };
+
+        const updated = rounds.map(r => r.id === draftRound.id ? activeRound : r);
+        saveRoundsToStorage(updated);
+        syncRoundToServer(activeRound);
+        setSelectedRoundId(activeRound.id);
+        setDraftRound(null);
+        setView('details');
+      };
+
+      const handleUpdateRound = (updatedRound) => {
+        const updated = rounds.map(r => r.id === updatedRound.id ? updatedRound : r);
+        saveRoundsToStorage(updated);
+        syncRoundToServer(updatedRound);
+      };
+
+      const handleDeleteRound = (roundId) => {
+        if (confirm("¿Estás seguro de que deseas eliminar este Sam/Tanda? Esta acción no se puede deshacer.")) {
+          const updated = rounds.filter(r => r.id !== roundId);
+          saveRoundsToStorage(updated);
+          deleteRoundFromServer(roundId);
+          setView('list');
+          setSelectedRoundId(null);
+        }
+      };
+
+      const handleImportAccept = (participantName, ticketsCount = 1) => {
+        if (!importedRound) return;
+        
+        // Guardar apodo localmente
+        const newProfile = { name: participantName };
+        setLocalUser(newProfile);
+        localStorage.setItem('sams_user_profile', JSON.stringify(newProfile));
+
+        const roundRef = db.collection('rounds').doc(importedRound.id);
+
+        if (importedRound.status === RoundStatus.DRAFT) {
+          // Obtener última versión desde Firestore
+          roundRef.get().then(docSnap => {
+            let round = docSnap.exists ? docSnap.data() : { ...importedRound };
+            if (!round.participants) round.participants = [];
+            
+            const existingIndex = round.participants.findIndex(p => p.name.trim().toLowerCase() === participantName.trim().toLowerCase());
+            if (existingIndex >= 0) {
+              round.participants[existingIndex].ticketsCount = ticketsCount;
+            } else {
+              round.participants.push({
+                id: `p-${Date.now()}-${Math.random()}`,
+                name: participantName,
+                ticketsCount: ticketsCount
+              });
+            }
+            
+            return roundRef.set(round, { merge: true }).then(() => {
+              window.history.replaceState({}, document.title, window.location.pathname);
+              setImportedRound(null);
+              setDraftRound({ id: importedRound.id, ...round });
+              setView('raffle');
+            });
+          }).catch(err => {
+            console.error("Error uniéndose al Sam en Firestore:", err);
+            // Fallback local
+            let updatedRound = { ...importedRound };
+            if (updatedRound.participants) {
+              const userExists = updatedRound.participants.some(p => p.name.trim().toLowerCase() === participantName.trim().toLowerCase());
+              if (!userExists) {
+                updatedRound.participants.push({
+                  id: `p-${Date.now()}`,
+                  name: participantName,
+                  ticketsCount: ticketsCount
+                });
+              }
+            }
+            const otherRounds = rounds.filter(r => r.id !== updatedRound.id);
+            const updated = [updatedRound, ...otherRounds];
+            saveRoundsToStorage(updated);
+            
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setImportedRound(null);
+            setDraftRound(updatedRound);
+            setView('raffle');
+          });
+        } else {
+          // Si ya está activa o completada, simplemente agregarla a Firestore si no está y redirigir
+          roundRef.get().then(docSnap => {
+            if (!docSnap.exists) {
+              roundRef.set(importedRound);
+            }
+          });
+          window.history.replaceState({}, document.title, window.location.pathname);
+          setImportedRound(null);
+          setSelectedRoundId(importedRound.id);
+          setView('details');
+        }
+      };
+
+      const handleImportReject = () => {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setImportedRound(null);
+        setView('list');
+      };
+
+      const selectedRound = rounds.find(r => r.id === selectedRoundId);
+
+      return (
+        <div className="min-h-screen flex flex-col justify-between selection:bg-indigo-100 selection:text-indigo-950 font-sans antialiased text-slate-900">
+          
+          {/* Header */}
+          <header className="border-b border-slate-100 bg-white/80 backdrop-blur-md sticky top-0 z-30 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+            <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+              <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setView('list')}>
+                <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 rounded-2xl flex items-center justify-center text-white shadow-md shadow-indigo-500/10 font-sans font-black text-lg transition-transform group-hover:scale-105 duration-200">
+                  S
+                </div>
+                <div>
+                  <h1 className="font-display font-bold text-lg text-slate-950 tracking-tight group-hover:text-indigo-600 transition-colors duration-200">
+                    Gestor de Sams y Tandas
+                  </h1>
+                  <span className="text-[10px] text-indigo-600 font-mono font-bold uppercase tracking-wider block leading-none mt-0.5">
+                    Bolso Financiero Personal
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowExplanation(!showExplanation)}
+                  className="text-slate-500 hover:text-indigo-600 text-xs font-semibold px-3 py-2 hover:bg-slate-50 rounded-xl transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-100"
+                >
+                  <Icon name="BookOpen" className="w-4 h-4" /> ¿Cómo funciona?
+                </button>
+
+                <div className="flex items-center gap-3 border-l border-slate-100 pl-3">
+                  <div className="hidden sm:flex flex-col text-right">
+                    <span className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider leading-none">
+                      Perfil Local
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5 justify-end">
+                      <span className="text-xs font-bold text-slate-800 max-w-[120px] truncate">
+                        {localUser.name}
+                      </span>
+                      <button
+                        onClick={handleUpdateProfileName}
+                        className="text-slate-400 hover:text-indigo-600 transition-all p-0.5 hover:bg-slate-50 rounded"
+                        title="Editar nombre"
+                      >
+                        <Icon name="Edit2" className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <div 
+                    onClick={handleUpdateProfileName}
+                    className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 font-bold text-xs flex items-center justify-center shadow-inner cursor-pointer hover:bg-indigo-100 transition-all"
+                  >
+                    {localUser.name[0].toUpperCase()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content */}
+          <main className="max-w-6xl mx-auto px-6 mt-8 flex-grow w-full">
+            
+            {/* Guide Quick Panel */}
+            {showExplanation && (
+              <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-slate-100 p-6 sm:p-8 rounded-3xl border border-indigo-500/20 shadow-xl relative overflow-hidden mb-6">
+                <button
+                  onClick={() => setShowExplanation(false)}
+                  className="absolute top-4 right-4 text-indigo-300 hover:text-white hover:bg-indigo-800/40 p-1.5 rounded-full transition-all"
+                >
+                  <Icon name="X" className="w-5 h-5" />
+                </button>
+                <div className="max-w-2xl relative z-10">
+                  <h3 className="text-xl font-display font-bold text-white mb-3">
+                    Guía Rápida de Sams y Tandas 🏦
+                  </h3>
+                  <div className="space-y-3.5 text-sm text-slate-300 leading-relaxed">
+                    <p>
+                      Un <strong>Sam</strong>, <strong>Tanda</strong> o <strong>Bolso Financiero</strong> es un fondo de ahorro grupal y rotativo muy popular. Así es como funciona nuestro sistema:
+                    </p>
+                    <ul className="list-none pl-0 space-y-2">
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-pink-400 font-bold mt-0.5">•</span>
+                        <span>
+                          <strong className="text-indigo-300 font-semibold">El Pozo (Monto Sam):</strong> Es el total neto que recibe el ganador de cada periodo (ej. $5,000).
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-indigo-400 font-bold mt-0.5">•</span>
+                        <span>
+                          <strong className="text-indigo-300 font-semibold">División Equitativa:</strong> Si defines un pozo de $5,000 con 5 números (cupos) totales, cada número aporta una cuota de <strong>$1,000</strong> por periodo.
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-pink-400 font-bold mt-0.5">•</span>
+                        <span>
+                          <strong className="text-indigo-300 font-semibold">Múltiples Cupos/Tickets:</strong> Puedes asignar a un participante más de 1 número (ej. Juan tiene 2 tickets). Esto significa que Juan aportará dos cuotas ($2,000) por periodo y cobrará el pozo dos veces en turnos diferentes.
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-indigo-400 font-bold mt-0.5">•</span>
+                        <span>
+                          <strong className="text-indigo-300 font-semibold">Sorteo de Números:</strong> El sistema incluye un sorteo animado para decidir aleatoriamente quién recibe el pozo en cada turno (quincenal, mensual o semanal).
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className="text-pink-400 font-bold mt-0.5">•</span>
+                        <span>
+                          <strong className="text-indigo-300 font-semibold">Control de Pagos:</strong> Dispones de una matriz dinámica para marcar quién ha pagado y quién debe en tiempo real, guardándose todo en tu navegador.
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* View Switching */}
+            {view === 'list' && (
+              <RoundList 
+                rounds={rounds} 
+                onSelectRound={handleSelectRound} 
+                onAddNewClick={() => setView('new-round')}
+                onDeleteRound={handleDeleteRound}
+              />
+            )}
+
+            {view === 'new-round' && (
+              <NewRoundModal 
+                onSave={handleNewRoundSave} 
+                onCancel={() => setView('list')}
+                localUserName={localUser.name}
+              />
+            )}
+
+            {view === 'raffle' && draftRound && (
+              <RaffleAnimation 
+                round={draftRound} 
+                onComplete={handleRaffleComplete} 
+                onCancel={() => {
+                  const updated = rounds.filter(r => r.id !== draftRound.id);
+                  saveRoundsToStorage(updated);
+                  setView('list');
+                }}
+              />
+            )}
+
+            {view === 'details' && selectedRound && (
+              <RoundDetails 
+                round={selectedRound} 
+                onUpdateRound={handleUpdateRound} 
+                onBack={() => setView('list')}
+                onDeleteRound={handleDeleteRound}
+              />
+            )}
+
+            {view === 'import' && importedRound && (
+              <ContractImportScreen
+                round={importedRound}
+                onAccept={handleImportAccept}
+                onReject={handleImportReject}
+                localUserName={localUser.name}
+                installPrompt={installPrompt}
+              />
+            )}
+
+          </main>
+
+          {/* Footer */}
+          <footer className="mt-20 border-t border-zinc-100 py-8 text-center text-xs text-zinc-400">
+            <div className="flex justify-center items-center gap-1.5">
+              <span>Gestor de Sams y Tandas © 2026</span>
+              <span>•</span>
+              <span className="flex items-center gap-1">
+                Hecho para tu seguridad financiera <Icon name="Heart" className="w-3.5 h-3.5 text-rose-500 animate-pulse" />
+              </span>
+            </div>
+          </footer>
+
+        </div>
+      );
+    }
+
+    // Component: ContractImportScreen
+    function ContractImportScreen({ round, onAccept, onReject, localUserName, installPrompt }) {
+      const [agreed, setAgreed] = useState(false);
+      
+      // Buscar coincidencia inicial
+      const matchedParticipant = round.participants?.find(p => p.name.trim().toLowerCase() === (localUserName || '').trim().toLowerCase());
+      const [customName, setCustomName] = useState(matchedParticipant ? matchedParticipant.name : (localUserName || ''));
+      const [isNewParticipant, setIsNewParticipant] = useState(!matchedParticipant);
+
+      const [ticketsCount, setTicketsCount] = useState(matchedParticipant ? (matchedParticipant.ticketsCount || 1) : 1);
+      const [isAccepted, setIsAccepted] = useState(false);
+      const [showStaticConfirm, setShowStaticConfirm] = useState(false);
+      const [copiedToken, setCopiedToken] = useState(false);
+
+      const creatorName = round.participants && round.participants[0] ? round.participants[0].name : 'Organizador';
+      const isDraft = round.status === 'Borrador';
+
+      const handleAcceptClick = () => {
+        if (!agreed) return;
+        if (isDraft) {
+          setShowStaticConfirm(true);
+        } else {
+          setIsAccepted(true);
+        }
+      };
+
+      const handleFinish = () => {
+        onAccept(customName.trim(), ticketsCount);
+      };
+
+      const handleInstallApp = () => {
+        if (installPrompt) {
+          installPrompt.prompt();
+          installPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+              console.log('User accepted the install prompt');
+            } else {
+              console.log('User dismissed the install prompt');
+            }
+          });
+        } else {
+          alert('Para instalar esta aplicación, haz clic en el botón de compartir de tu navegador y selecciona "Añadir a la pantalla de inicio" o busca el icono de instalar en la barra de direcciones.');
+        }
+      };
+
+      // Generar token de confirmación para el creador
+      const getConfirmationToken = () => {
+        try {
+          const data = {
+            joinRoundId: round.id,
+            name: customName.trim(),
+            ticketsCount: ticketsCount
+          };
+          return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+        } catch(e) {
+          return "";
+        }
+      };
+
+      const handleCopyConfirmationToken = () => {
+        const token = getConfirmationToken();
+        const textToCopy = `Hola, ya acepté el contrato de tu Sam "${round.name}". Me uní como "${customName.trim()}" con ${ticketsCount} cupo(s). Registra mi código de confirmación en la app:\n\n${token}`;
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          setCopiedToken(true);
+          setTimeout(() => setCopiedToken(false), 2000);
+        });
+      };
+
+      if (showStaticConfirm) {
+        return (
+          <div className="max-w-xl mx-auto px-4 py-8">
+            <div className="bg-white rounded-3xl border border-indigo-100 shadow-xl p-8 text-center space-y-6">
+              <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 text-indigo-650 rounded-full flex items-center justify-center mx-auto shadow-md">
+                <Icon name="Share2" className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-2xl font-display font-bold text-slate-900 tracking-tight">
+                  ¡Confirmación Lista! ✉️
+                </h2>
+                <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">
+                  Dado que estás en la versión web compartida, debes enviarle tu código de aceptación al organizador para que te añada oficialmente al sorteo.
+                </p>
+              </div>
+
+              <div className="space-y-2 text-left">
+                <label className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">Mensaje de Confirmación</label>
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-xs text-slate-600 font-mono break-all max-h-32 overflow-y-auto">
+                  {`Hola, ya acepté el contrato de tu Sam "${round.name}". Me uní como "${customName.trim()}" con ${ticketsCount} cupo(s)...`}
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  onClick={handleCopyConfirmationToken}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl transition-all shadow-md text-sm flex items-center justify-center gap-1.5"
+                >
+                  <Icon name="Share2" className="w-4 h-4" />
+                  {copiedToken ? '¡Copiado!' : 'Copiar Mensaje y Código'}
+                </button>
+                
+                <button
+                  onClick={handleFinish}
+                  className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-2xl transition-all shadow-md text-sm"
+                >
+                  Ir a mi Panel de Control
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+
+      if (isAccepted) {
+        return (
+          <div className="max-w-xl mx-auto px-4 py-8">
+            <div className="bg-white rounded-3xl border border-emerald-100 shadow-xl p-8 text-center space-y-6">
+              <div className="w-16 h-16 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-md">
+                <Icon name="CheckCircle" className="w-8 h-8" />
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-2xl font-display font-bold text-slate-900 tracking-tight">
+                  ¡Contrato Aceptado! 🎉
+                </h2>
+                <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">
+                  Te has integrado correctamente al Sam <strong className="text-slate-800 font-semibold">"{round.name}"</strong>. El Sam ha sido guardado localmente en tu dispositivo.
+                </p>
+              </div>
+
+              {/* Add to Home Screen Promo / Install */}
+              <div className="bg-gradient-to-br from-indigo-50 to-violet-50/50 border border-indigo-100 p-5 rounded-2xl text-left space-y-3">
+                <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                  <Icon name="Award" className="w-4 h-4 text-indigo-600" />
+                  Instalar Aplicación en Dispositivo
+                </h4>
+                <p className="text-xs text-slate-600 leading-normal">
+                  Puedes guardar este gestor de Sams directamente en tu teléfono o computadora para acceder sin conexión y sin necesidad de internet en el futuro.
+                </p>
+                <button
+                  onClick={handleInstallApp}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md inline-flex items-center gap-1.5"
+                >
+                  <Icon name="Download" className="w-4 h-4" /> Instalar Aplicación
+                </button>
+              </div>
+
+              <button
+                onClick={handleFinish}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-2xl transition-all shadow-md text-sm"
+              >
+                Ir a mi Panel de Control
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="max-w-xl mx-auto px-4 py-8">
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_15px_50px_rgba(0,0,0,0.03)] p-6 sm:p-8 space-y-6">
+            
+            {/* Header Title */}
+            <div className="text-center space-y-2">
+              <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <Icon name="Award" className="w-7 h-7" />
+              </div>
+              <h2 className="text-xl sm:text-2xl font-display font-bold tracking-tight text-slate-950">
+                {isDraft ? 'Contrato de Invitación al Sam (Borrador)' : 'Contrato de Incorporación al Sam'}
+              </h2>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                Has sido invitado por <strong className="text-slate-800 font-semibold">{creatorName}</strong> para participar en este grupo de ahorro.
+              </p>
+            </div>
+
+            {/* Formal text */}
+            <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-xs text-slate-600 space-y-2 max-h-40 overflow-y-auto leading-relaxed">
+              <p className="font-bold text-slate-805">TÉRMINOS DE PARTICIPACIÓN Y COMPROMISO MUTUO</p>
+              <p>
+                Por medio del presente documento, el participante manifiesta su voluntad formal de integrarse al grupo de ahorro rotativo (denominado "Sam" o "Tanda") detallado a continuación.
+              </p>
+              <p>
+                Al aceptar este acuerdo, usted se compromete de manera irrevocable a realizar sus aportaciones de capital de forma puntual en cada uno de los periodos establecidos por el organizador. El incumplimiento de los pagos afecta directamente el pozo financiero de los demás participantes.
+              </p>
+              <p>
+                Una vez aceptado este contrato, la aplicación quedará guardada de manera permanente en este dispositivo, permitiéndole acceso total para ver y registrar el progreso del Sam de forma local.
+              </p>
+            </div>
+
+            {/* Details Box */}
+            <div className="bg-gradient-to-br from-indigo-50/40 to-violet-50/20 border border-indigo-100/40 rounded-2xl p-5 space-y-4">
+              <h3 className="text-xs font-sans font-bold text-indigo-900 uppercase tracking-widest">
+                Detalles del Grupo Financiero
+              </h3>
+
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <span className="text-slate-400 block">Nombre del Sam</span>
+                  <strong className="text-slate-900 font-bold block truncate">{round.name}</strong>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 block">Monto a Recibir (Pozo)</span>
+                  <strong className="text-indigo-650 font-black block">${round.totalAmount.toLocaleString()}</strong>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 block">Frecuencia de Pagos</span>
+                  <strong className="text-slate-900 font-bold block">{round.frequency}</strong>
+                </div>
+
+                <div>
+                  <span className="text-slate-400 block">Aporte por Turno</span>
+                  <strong className="text-slate-900 font-bold block">
+                    {isDraft ? `Por definir (aprox. $${round.contributionPerTicket})` : `$${round.contributionPerTicket.toLocaleString()}`}
+                  </strong>
+                </div>
+
+                <div className="col-span-2 border-t border-slate-100 pt-3">
+                  <span className="text-slate-400 block">Fecha de Inicio Programada</span>
+                  <strong className="text-slate-900 font-bold block">{formatLocalDate(round.startDate)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Selector de Nombre de Participante (Permite identificarse como un participante existente o unirse como uno nuevo) */}
+            <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-100/80">
+              <label className="text-[10px] font-mono font-bold text-indigo-700 uppercase tracking-wider block">
+                Selecciona tu nombre o regístrate en este Sam
+              </label>
+              
+              <div className="space-y-2">
+                <select
+                  className="w-full bg-white border border-slate-200 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-800 outline-none transition-all shadow-sm"
+                  onChange={(e) => {
+                    if (e.target.value === "new") {
+                      setCustomName("");
+                      setIsNewParticipant(true);
+                    } else {
+                      const selectedPart = round.participants?.find(p => p.name === e.target.value);
+                      setCustomName(e.target.value);
+                      setIsNewParticipant(false);
+                      if (selectedPart) {
+                        setTicketsCount(selectedPart.ticketsCount || 1);
+                      }
+                    }
+                  }}
+                  value={isNewParticipant ? "new" : customName}
+                >
+                  <option value="new">-- No estoy en la lista (Nuevo) --</option>
+                  {round.participants && round.participants.map(p => (
+                    <option key={p.id} value={p.name}>
+                      {p.name} {p.id.startsWith('dp-') ? '(Creador)' : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {(isNewParticipant || !round.participants?.some(p => p.name.trim().toLowerCase() === customName.trim().toLowerCase())) && (
+                  <input
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="Escribe tu nombre o apodo..."
+                    className="w-full bg-white border border-slate-200/80 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-800 outline-none transition-all shadow-sm"
+                  />
+                )}
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Al identificarte con tu nombre correcto, el panel de control se adaptará para mostrar tus pagos y turnos de cobro específicos.
+              </p>
+            </div>
+
+            {/* Ticket Selector for Draft Rounds */}
+            {isDraft && (
+              <div className="space-y-2 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50">
+                <label className="text-[10px] font-mono font-bold text-indigo-700 uppercase tracking-wider block">
+                  ¿Cuántos cupos deseas pagar/adquirir?
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTicketsCount(Math.max(1, ticketsCount - 1))}
+                    className="w-8 h-8 rounded-lg bg-white border border-indigo-200 flex items-center justify-center font-bold text-slate-800 shadow-sm active:scale-95 transition-all"
+                  >
+                    -
+                  </button>
+                  <span className="font-mono font-bold text-sm w-8 text-center text-indigo-950">{ticketsCount}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTicketsCount(ticketsCount + 1)}
+                    className="w-8 h-8 rounded-lg bg-white border border-indigo-200 flex items-center justify-center font-bold text-slate-800 shadow-sm active:scale-95 transition-all"
+                  >
+                    +
+                  </button>
+                </div>
+                <p className="text-[9px] text-indigo-700/80">
+                  Adquirir múltiples cupos te asignará más de un turno de cobro y tendrás que aportar una cuota por cada cupo.
+                </p>
+              </div>
+            )}
+
+            {/* Checkbox Agreement */}
+            <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+              <button
+                onClick={() => setAgreed(!agreed)}
+                className={`w-6 h-6 rounded-lg border flex-shrink-0 flex items-center justify-center transition-all ${
+                  agreed
+                    ? 'border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                    : 'border-slate-300 bg-white hover:border-indigo-400'
+                }`}
+              >
+                {agreed && <Icon name="Check" className="w-4 h-4" />}
+              </button>
+              <div className="text-xs text-slate-650 leading-normal">
+                <label className="cursor-pointer select-none font-medium">
+                  {isDraft ? (
+                    <span>Confirmo que deseo unirme al Sam y me comprometo a pagar puntualmente mis aportes según el número de cupos seleccionados.</span>
+                  ) : (
+                    <span>Confirmo que estoy totalmente de acuerdo con el monto de <strong className="text-slate-800">${round.totalAmount.toLocaleString()}</strong>, las cuotas de <strong className="text-slate-800">${round.contributionPerTicket.toLocaleString()}</strong> y el calendario de pagos. Me comprometo a cumplir.</span>
+                  )}
+                </label>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                onClick={onReject}
+                className="flex-1 order-2 sm:order-1 bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 hover:border-rose-100 font-bold py-3 rounded-2xl transition-all text-sm flex items-center justify-center gap-1.5"
+              >
+                <Icon name="X" className="w-4 h-4" /> Rechazar
+              </button>
+
+              <button
+                onClick={handleAcceptClick}
+                disabled={!agreed}
+                className={`flex-1 order-1 sm:order-2 font-bold py-3 rounded-2xl transition-all text-sm flex items-center justify-center gap-1.5 shadow-md ${
+                  agreed
+                    ? 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-indigo-500/15'
+                    : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed shadow-none'
+                }`}
+              >
+                <Icon name="CheckCircle" className="w-4 h-4" />
+                {isDraft ? 'Aceptar y Esperar Sorteo' : 'Aceptar y Acceder'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Component: RoundList
+    function RoundList({ rounds, onSelectRound, onAddNewClick, onDeleteRound }) {
+      const activeRounds = rounds.filter(r => r.status === RoundStatus.ACTIVE);
+      const drafts = rounds.filter(r => r.status === RoundStatus.DRAFT);
+      const completed = rounds.filter(r => r.status === RoundStatus.COMPLETED);
+
+      // Dashboard stats
+      const totalSaved = rounds
+        .filter(r => r.status === RoundStatus.ACTIVE || r.status === RoundStatus.COMPLETED)
+        .reduce((sum, r) => {
+          const paidAmount = r.payments ? r.payments.filter(p => p.isPaid).reduce((s, p) => s + p.amount, 0) : 0;
+          return sum + paidAmount;
+        }, 0);
+
+      const activeCount = activeRounds.length;
+
+      return (
+        <div className="space-y-8">
+          
+          {/* Stats Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <Icon name="Coins" className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Ahorrado</span>
+                <h3 className="text-2xl font-display font-black text-slate-900">${totalSaved.toLocaleString()}</h3>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-pink-50 text-pink-600 flex items-center justify-center">
+                <Icon name="Award" className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Sams Activos</span>
+                <h3 className="text-2xl font-display font-black text-slate-900">{activeCount}</h3>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <Icon name="CheckCircle" className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Sams Completados</span>
+                <h3 className="text-2xl font-display font-black text-slate-900">{completed.length}</h3>
+              </div>
+            </div>
+          </div>
+
+          {/* Round Section */}
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-display font-bold text-slate-900">Mis Rondas y Tandas</h2>
+            <button 
+              onClick={onAddNewClick}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5"
+            >
+              <Icon name="Plus" className="w-4 h-4" /> Crear Nuevo Sam
+            </button>
+          </div>
+
+          {rounds.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-12 text-center space-y-4">
+              <div className="w-12 h-12 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mx-auto">
+                <Icon name="Info" className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display font-bold text-slate-800 text-lg">No hay ningún Sam registrado</h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">¡Empieza creando tu primer Sam o Tanda y planifica tus ahorros grupales!</p>
+              </div>
+              <button 
+                onClick={onAddNewClick}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md inline-flex items-center gap-1.5"
+              >
+                <Icon name="Plus" className="w-4 h-4" /> Crear Sam
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {rounds.map(round => {
+                const totalParticipants = round.participants?.length || 0;
+                const totalTickets = round.tickets?.length || round.participants?.reduce((s, p) => s + p.ticketsCount, 0) || 0;
+                const totalPaid = round.payments ? round.payments.filter(p => p.isPaid).length : 0;
+                const totalCount = round.payments ? round.payments.length : 0;
+                const completionRate = totalCount > 0 ? Math.round((totalPaid / totalCount) * 100) : 0;
+
+                return (
+                  <div 
+                    key={round.id}
+                    onClick={() => onSelectRound(round)}
+                    className="bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer p-6 space-y-4 group relative overflow-hidden"
+                  >
+                    {/* Status Badge */}
+                    <div className="flex justify-between items-start">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono tracking-wider ${
+                        round.status === RoundStatus.ACTIVE 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                          : round.status === RoundStatus.DRAFT
+                          ? 'bg-amber-50 text-amber-700 border border-amber-100 animate-pulse'
+                          : 'bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}>
+                        {round.status.toUpperCase()}
+                      </span>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteRound(round.id);
+                        }}
+                        className="text-slate-300 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg transition-colors"
+                        title="Eliminar Sam"
+                      >
+                        <Icon name="Trash2" className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-1">
+                      <h3 className="font-display font-bold text-slate-800 text-lg group-hover:text-indigo-600 transition-colors truncate">
+                        {round.name}
+                      </h3>
+                      <p className="text-xs text-slate-400 flex items-center gap-1">
+                        <Icon name="Calendar" className="w-3.5 h-3.5 text-slate-300" />
+                        Inicia el {formatLocalDateShort(round.startDate)}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 border-t border-b border-slate-50 py-3">
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Pozo Total</span>
+                        <h4 className="font-display font-black text-slate-850 text-base">${round.totalAmount.toLocaleString()}</h4>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Frecuencia</span>
+                        <h4 className="font-semibold text-slate-800 text-sm">{round.frequency}</h4>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <div className="flex items-center gap-1">
+                        <Icon name="Users" className="w-4 h-4 text-slate-300" />
+                        <span>{totalParticipants} partic. ({totalTickets} cupos)</span>
+                      </div>
+                      {round.status !== RoundStatus.DRAFT && (
+                        <div className="flex items-center gap-1 font-semibold text-indigo-600 bg-indigo-50/50 px-2.5 py-0.5 rounded-full border border-indigo-100/30">
+                          <span>{completionRate}% cobrado</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Component: NewRoundModal
+    function NewRoundModal({ onSave, onCancel, localUserName }) {
+      // Cargar borrador guardado de localStorage
+      const savedDraft = (() => {
+        try {
+          const raw = localStorage.getItem('sams_draft_form');
+          return raw ? JSON.parse(raw) : null;
+        } catch(e) { return null; }
+      })();
+
+      const [step, setStep] = useState(savedDraft ? savedDraft.step || 1 : 1);
+      const [name, setName] = useState(savedDraft ? savedDraft.name || '' : '');
+      const [totalAmount, setTotalAmount] = useState(savedDraft ? savedDraft.totalAmount || 10000 : 10000);
+      const [frequency, setFrequency] = useState(savedDraft ? savedDraft.frequency || Frequency.BIWEEKLY : Frequency.BIWEEKLY);
+      const [startDate, setStartDate] = useState(() => {
+        if (savedDraft && savedDraft.startDate) return savedDraft.startDate;
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      });
+      const [paymentDay1, setPaymentDay1] = useState(savedDraft ? savedDraft.paymentDay1 || 10 : 10);
+      const [paymentDay2, setPaymentDay2] = useState(savedDraft ? savedDraft.paymentDay2 || 25 : 25);
+      const [roundId] = useState(() => savedDraft ? savedDraft.roundId || `round-${Date.now()}` : `round-${Date.now()}`);
+
+      const [participants, setParticipants] = useState(() => {
+        if (savedDraft && savedDraft.participants && savedDraft.participants.length > 0) {
+          return savedDraft.participants;
+        }
+        return [{ id: 'creator-1', name: `${localUserName}`, ticketsCount: 1 }];
+      });
+      const [newParticipantName, setNewParticipantName] = useState('');
+      const [copiedDraftInvite, setCopiedDraftInvite] = useState(false);
+
+      // Auto-guardar borrador en localStorage cada vez que cambie algo
+      useEffect(() => {
+        const draft = { step, name, totalAmount, frequency, startDate, paymentDay1, paymentDay2, roundId, participants };
+        localStorage.setItem('sams_draft_form', JSON.stringify(draft));
+      }, [step, name, totalAmount, frequency, startDate, paymentDay1, paymentDay2, participants]);
+
+      // Limpiar borrador cuando se crea o cancela
+      const clearDraft = () => localStorage.removeItem('sams_draft_form');
+
+
+      const handleCopyDraftInvite = () => {
+        try {
+          const draftRound = {
+            id: roundId,
+            name: name.trim(),
+            totalAmount,
+            contributionPerTicket,
+            frequency,
+            startDate,
+            status: RoundStatus.DRAFT,
+            participants,
+            createdAt: new Date().toISOString()
+          };
+
+          const rawB64 = btoa(unescape(encodeURIComponent(JSON.stringify(draftRound))));
+          const shareUrl = `${window.location.origin}${window.location.pathname}?import=${rawB64}`;
+          
+          navigator.clipboard.writeText(shareUrl).then(() => {
+            setCopiedDraftInvite(true);
+            setTimeout(() => setCopiedDraftInvite(false), 2000);
+          });
+        } catch(e) {
+          alert("Error al generar el enlace de invitación al borrador.");
+        }
+      };
+      const handleImportStaticToken = () => {
+        const rawToken = prompt("Pega el código de confirmación enviado por tu participante:");
+        if (!rawToken || !rawToken.trim()) return;
+
+        try {
+          const cleanToken = rawToken.trim();
+          let tokenPart = cleanToken;
+          if (cleanToken.includes('\n')) {
+            const lines = cleanToken.split('\n');
+            tokenPart = lines[lines.length - 1].trim();
+          }
+
+          const decodedData = JSON.parse(decodeURIComponent(escape(atob(tokenPart))));
+          if (decodedData.name && decodedData.ticketsCount) {
+            const existingIndex = participants.findIndex(p => p.name.trim().toLowerCase() === decodedData.name.trim().toLowerCase());
+            if (existingIndex >= 0) {
+              handleUpdateTickets(participants[existingIndex].id, decodedData.ticketsCount);
+              alert(`¡Actualizado! ${decodedData.name} ahora tiene ${decodedData.ticketsCount} cupo(s).`);
+            } else {
+              const newP = {
+                id: `p-${Date.now()}-${Math.random()}`,
+                name: decodedData.name.trim(),
+                ticketsCount: decodedData.ticketsCount
+              };
+              setParticipants([...participants, newP]);
+              alert(`¡Participante agregado! ${decodedData.name} se unió con ${decodedData.ticketsCount} cupo(s).`);
+            }
+          } else {
+            alert("El código de confirmación no tiene el formato esperado.");
+          }
+        } catch(e) {
+          console.error(e);
+          alert("Código inválido. Asegúrate de copiar el código completo.");
+        }
+      };
+      const totalTickets = participants.reduce((acc, p) => acc + p.ticketsCount, 0);
+      const contributionPerTicket = totalTickets > 0 ? Math.round((totalAmount / totalTickets)) : 0;
+
+      const handleAddParticipant = (e) => {
+        e.preventDefault();
+        if (!newParticipantName.trim()) return;
+        
+        const newP = {
+          id: `p-${Date.now()}-${Math.random()}`,
+          name: newParticipantName.trim(),
+          ticketsCount: 1
+        };
+        
+        setParticipants([...participants, newP]);
+        setNewParticipantName('');
+      };
+
+      const handleRemoveParticipant = (id) => {
+        if (id === 'creator-1') {
+          alert("No puedes eliminar al organizador.");
+          return;
+        }
+        setParticipants(participants.filter(p => p.id !== id));
+      };
+
+      const handleUpdateTickets = (id, count) => {
+        if (count < 1) return;
+        setParticipants(participants.map(p => p.id === id ? { ...p, ticketsCount: count } : p));
+      };
+
+      const handleNextStep = () => {
+        if (!name.trim()) {
+          alert('Por favor ingresa un nombre para el Sam / Tanda.');
+          return;
+        }
+        if (totalAmount <= 0) {
+          alert('Por favor ingresa un monto total válido.');
+          return;
+        }
+        setStep(2);
+      };
+
+      const handleCreateRound = () => {
+        if (participants.length < 2) {
+          alert('Por favor registra al menos 2 participantes para iniciar.');
+          return;
+        }
+
+        const draftRound = {
+          id: roundId,
+          name: name.trim(),
+          totalAmount,
+          contributionPerTicket,
+          frequency,
+          startDate,
+          status: RoundStatus.DRAFT,
+          participants,
+          tickets: [],
+          periods: [],
+          payments: [],
+          createdAt: new Date().toISOString(),
+          paymentDay1: (frequency === Frequency.MONTHLY || frequency === Frequency.BIWEEKLY) ? paymentDay1 : undefined,
+          paymentDay2: frequency === Frequency.BIWEEKLY ? paymentDay2 : undefined,
+        };
+
+        clearDraft();
+        onSave(draftRound);
+      };
+
+      return (
+        <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-750 text-white p-8">
+            <span className="bg-indigo-700/60 text-indigo-100 text-xs font-mono px-3 py-1 rounded-full uppercase tracking-wider font-semibold">
+              Crear Nuevo Sam / Tanda
+            </span>
+            <h2 className="text-2xl font-display font-bold tracking-tight mt-2">Configura tu Bolso Grupal</h2>
+            <p className="text-indigo-100/70 text-xs mt-1">Sigue los pasos para definir el pozo, registrar participantes e iniciar el sorteo de turnos.</p>
+          </div>
+
+          <div className="p-8">
+            {/* Step Indicators */}
+            <div className="flex items-center justify-center gap-3 mb-8">
+              <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold font-mono border ${step === 1 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>1</span>
+              <div className="w-12 h-0.5 bg-slate-200" />
+              <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold font-mono border ${step === 2 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>2</span>
+            </div>
+
+            {step === 1 ? (
+              <div className="space-y-6">
+                {localStorage.getItem('sams_draft_form') && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                        <Icon name="Clock" className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-amber-900">Borrador Restaurado</h4>
+                        <p className="text-[10px] text-amber-750">Recuperamos los datos que estabas editando anteriormente.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm("¿Estás seguro de que quieres borrar el borrador y empezar de cero?")) {
+                          clearDraft();
+                          setName('');
+                          setTotalAmount(10000);
+                          setFrequency(Frequency.BIWEEKLY);
+                          const today = new Date();
+                          const yyyy = today.getFullYear();
+                          const mm = String(today.getMonth() + 1).padStart(2, '0');
+                          const dd = String(today.getDate()).padStart(2, '0');
+                          setStartDate(`${yyyy}-${mm}-${dd}`);
+                          setPaymentDay1(10);
+                          setPaymentDay2(25);
+                          setParticipants([{ id: 'creator-1', name: `${localUserName}`, ticketsCount: 1 }]);
+                          setStep(1);
+                        }
+                      }}
+                      className="text-[10px] font-bold text-amber-700 hover:text-amber-900 bg-amber-100/50 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-all"
+                    >
+                      Empezar de Cero
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Nombre del Sam / Tanda</label>
+                    <input 
+                      type="text" 
+                      placeholder="Ej. Tanda de Oficina Navidad" 
+                      value={name} 
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Monto Total del Pozo ($)</label>
+                    <input 
+                      type="number" 
+                      value={totalAmount === 0 ? '' : totalAmount} 
+                      onChange={(e) => setTotalAmount(e.target.value === '' ? 0 : parseInt(e.target.value))}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Frecuencia de Aportes</label>
+                    <select 
+                      value={frequency} 
+                      onChange={(e) => setFrequency(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all bg-white"
+                    >
+                      <option value={Frequency.WEEKLY}>Semanal</option>
+                      <option value={Frequency.BIWEEKLY}>Quincenal</option>
+                      <option value={Frequency.MONTHLY}>Mensual</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Fecha de Inicio</label>
+                    <input 
+                      type="date" 
+                      value={startDate} 
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Custom Days for Monthly / Biweekly */}
+                {frequency === Frequency.MONTHLY && (
+                  <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50 space-y-2">
+                    <h4 className="text-xs font-bold text-indigo-900 uppercase">Día del mes para Cobro</h4>
+                    <p className="text-[10px] text-indigo-700/80">Configura en qué día de cada mes se espera recibir el aporte de cada cupo.</p>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="31" 
+                      value={paymentDay1} 
+                      onChange={(e) => setPaymentDay1(parseInt(e.target.value) || 1)}
+                      className="w-24 px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold text-indigo-900"
+                    />
+                  </div>
+                )}
+
+                {frequency === Frequency.BIWEEKLY && (
+                  <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50 space-y-4">
+                    <h4 className="text-xs font-bold text-indigo-900 uppercase">Días del mes alternos para Cobro</h4>
+                    <p className="text-[10px] text-indigo-700/80">Configura las dos fechas quincenales fijas (ej. 15 y 30) para las cuotas quincenales.</p>
+                    <div className="flex gap-4">
+                      <div>
+                        <span className="text-[10px] text-slate-500 font-semibold block mb-1">Primer Día</span>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="31" 
+                          value={paymentDay1} 
+                          onChange={(e) => setPaymentDay1(parseInt(e.target.value) || 1)}
+                          className="w-24 px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold text-indigo-900"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 font-semibold block mb-1">Segundo Día</span>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="31" 
+                          value={paymentDay2} 
+                          onChange={(e) => setPaymentDay2(parseInt(e.target.value) || 1)}
+                          className="w-24 px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-bold text-indigo-900"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-4 border-t border-slate-100">
+                  <button 
+                    onClick={onCancel}
+                    className="py-3 px-6 rounded-xl border border-slate-200 hover:bg-slate-50 font-semibold text-xs text-slate-700 mr-3 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={handleNextStep}
+                    className="py-3 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-all shadow-md flex items-center gap-1.5"
+                  >
+                    Siguiente: Participantes <Icon name="ArrowRight" className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Participant registration */}
+                <form onSubmit={handleAddParticipant} className="flex gap-3">
+                  <div className="flex-1">
+                    <input 
+                      type="text" 
+                      placeholder="Nombre del participante..." 
+                      value={newParticipantName}
+                      onChange={(e) => setNewParticipantName(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-medium transition-all"
+                    />
+                  </div>
+                  <button 
+                    type="submit"
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-5 rounded-xl font-bold text-xs flex items-center gap-1 transition-all"
+                  >
+                    <Icon name="Plus" className="w-4 h-4" /> Agregar
+                  </button>
+                </form>
+
+                {/* Botones para compartir invitación y registrar confirmaciones */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button 
+                    type="button"
+                    onClick={handleCopyDraftInvite}
+                    className="flex-1 py-3 px-4 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <Icon name="Share2" className="w-4 h-4" /> 
+                    {copiedDraftInvite ? '¡Enlace Copiado!' : 'Copiar Enlace de Invitación'}
+                  </button>
+
+                  <button 
+                    type="button"
+                    onClick={handleImportStaticToken}
+                    className="flex-1 py-3 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <Icon name="Upload" className="w-4 h-4" /> 
+                    Registrar Código de Invitado
+                  </button>
+                </div>
+
+                {/* List of registered */}
+                <div className="border border-slate-100 rounded-2xl overflow-hidden max-h-72 overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                      <tr>
+                        <th className="px-6 py-3.5">Nombre</th>
+                        <th className="px-6 py-3.5 text-center">Nº de Cupos (Tickets)</th>
+                        <th className="px-6 py-3.5 text-right">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 text-slate-700 font-medium">
+                      {participants.map(p => (
+                        <tr key={p.id} className="hover:bg-slate-50/50">
+                          <td className="px-6 py-4">{p.name}</td>
+                          <td className="px-6 py-4 flex justify-center">
+                            <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-3 py-1 rounded-lg">
+                              <button 
+                                onClick={() => handleUpdateTickets(p.id, p.ticketsCount - 1)}
+                                className="text-slate-400 hover:text-slate-600 font-black"
+                              >
+                                -
+                              </button>
+                              <span className="font-mono font-bold w-6 text-center">{p.ticketsCount}</span>
+                              <button 
+                                onClick={() => handleUpdateTickets(p.id, p.ticketsCount + 1)}
+                                className="text-slate-400 hover:text-slate-600 font-black"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {p.id !== 'creator-1' && (
+                              <button 
+                                onClick={() => handleRemoveParticipant(p.id)}
+                                className="text-slate-400 hover:text-rose-600 p-1 hover:bg-rose-50 rounded"
+                              >
+                                <Icon name="Trash2" className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary Box */}
+                <div className="bg-indigo-50 border border-indigo-100 rounded-3xl p-5 grid grid-cols-3 gap-6 text-center">
+                  <div>
+                    <span className="text-[10px] text-indigo-600 font-semibold uppercase tracking-wider">Total Participantes</span>
+                    <h4 className="font-display font-black text-indigo-950 text-lg">{participants.length}</h4>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-indigo-600 font-semibold uppercase tracking-wider">Cupos Totales (Turnos)</span>
+                    <h4 className="font-display font-black text-indigo-950 text-lg">{totalTickets}</h4>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-indigo-600 font-semibold uppercase tracking-wider">Cuota por Cupo</span>
+                    <h4 className="font-display font-black text-indigo-950 text-lg">${contributionPerTicket.toLocaleString()}</h4>
+                  </div>
+                </div>
+
+                <div className="flex justify-between pt-4 border-t border-slate-100">
+                  <button 
+                    onClick={() => setStep(1)}
+                    className="py-3 px-6 rounded-xl border border-slate-200 hover:bg-slate-50 font-semibold text-xs text-slate-700 transition-colors flex items-center gap-1"
+                  >
+                    <Icon name="ArrowLeft" className="w-4 h-4" /> Atrás
+                  </button>
+                  <button 
+                    onClick={handleCreateRound}
+                    className="py-3 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-all shadow-md flex items-center gap-1.5"
+                  >
+                    Crear Sam y Rifar Turnos <Icon name="Award" className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Component: RaffleAnimation
+    function RaffleAnimation({ round, onComplete, onCancel }) {
+      const participants = round.participants;
+      const [draftTickets, setDraftTickets] = useState(() => Array(participants.reduce((acc, p) => acc + p.ticketsCount, 0)).fill(null));
+      const [isDrawing, setIsDrawing] = useState(false);
+      const [currentDrawingNumber, setCurrentDrawingNumber] = useState(null);
+      const [tickerName, setTickerName] = useState('');
+      const [step, setStep] = useState('intro');
+
+      const totalTicketsCount = draftTickets.length;
+
+      const getAvailablePool = (currentTickets) => {
+        const assignedCounts = {};
+        currentTickets.forEach(t => {
+          if (t) {
+            assignedCounts[t.participantId] = (assignedCounts[t.participantId] || 0) + 1;
+          }
+        });
+
+        const pool = [];
+        participants.forEach(p => {
+          const assigned = assignedCounts[p.id] || 0;
+          const remaining = p.ticketsCount - assigned;
+          for (let i = 0; i < remaining; i++) {
+            pool.push({ participantId: p.id, participantName: p.name });
+          }
+        });
+        return pool;
+      };
+
+      const handleQuickDraw = () => {
+        const pool = getAvailablePool(draftTickets);
+        if (pool.length === 0) return;
+
+        const shuffledPool = [...pool].sort(() => Math.random() - 0.5);
+        const newTickets = [...draftTickets];
+        let poolIndex = 0;
+        
+        for (let i = 0; i < newTickets.length; i++) {
+          if (newTickets[i] === null) {
+            const item = shuffledPool[poolIndex++];
+            newTickets[i] = {
+              id: `ticket-${i + 1}-${Date.now()}-${Math.random()}`,
+              number: i + 1,
+              participantId: item.participantId,
+              participantName: item.participantName
+            };
+          }
+        }
+        
+        setDraftTickets(newTickets);
+        setStep('completed');
+      };
+
+      const startSequentialDraw = async () => {
+        setIsDrawing(true);
+        setStep('drawing');
+        
+        const newTickets = [...draftTickets];
+        
+        for (let i = 0; i < newTickets.length; i++) {
+          if (newTickets[i] !== null) continue;
+
+          setCurrentDrawingNumber(i + 1);
+          const pool = getAvailablePool(newTickets);
+          if (pool.length === 0) break;
+
+          const startTime = Date.now();
+          const spinDuration = 800;
+          
+          while (Date.now() - startTime < spinDuration) {
+            const randomName = pool[Math.floor(Math.random() * pool.length)].participantName;
+            setTickerName(randomName);
+            await new Promise(resolve => setTimeout(resolve, 60));
+          }
+
+          const finalPool = getAvailablePool(newTickets);
+          const randomIndex = Math.floor(Math.random() * finalPool.length);
+          const drawnItem = finalPool[randomIndex];
+
+          newTickets[i] = {
+            id: `ticket-${i + 1}-${Date.now()}-${Math.random()}`,
+            number: i + 1,
+            participantId: drawnItem.participantId,
+            participantName: drawnItem.participantName
+          };
+
+          setDraftTickets([...newTickets]);
+          await new Promise(resolve => setTimeout(resolve, 305));
+        }
+
+        setIsDrawing(false);
+        setCurrentDrawingNumber(null);
+        setStep('completed');
+      };
+
+      const handleSave = () => {
+        if (!draftTickets.every(t => t !== null)) {
+          alert('Por favor asigna todos los números antes de continuar.');
+          return;
+        }
+        onComplete(draftTickets);
+      };
+
+      return (
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-indigo-900 via-purple-800 to-indigo-800 text-white p-8 relative overflow-hidden">
+            <span className="bg-indigo-700/60 text-indigo-100 text-xs font-mono px-3 py-1 rounded-full uppercase tracking-wider font-semibold">
+              Sorteo de Turnos
+            </span>
+            <h2 className="text-3xl font-display font-bold tracking-tight mt-2 text-white">Rifa los Números del Sam</h2>
+            <p className="text-indigo-100/80 text-sm mt-1 max-w-xl">
+              Asigna de manera aleatoria y transparente las fechas de cobro de cada participant con una animación dinámica.
+            </p>
+          </div>
+
+          <div className="p-8 space-y-6">
+            {step === 'intro' && (
+              <div className="text-center py-12 space-y-8">
+                <div className="flex justify-center gap-4">
+                  <button 
+                    onClick={startSequentialDraw}
+                    className="bg-gradient-to-tr from-indigo-600 to-violet-600 text-white py-5 px-8 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-2 max-w-xs w-full"
+                  >
+                    <Icon name="Play" className="w-8 h-8" />
+                    <span className="text-lg font-bold">Sorteo Animado</span>
+                    <span className="text-xs text-indigo-100">Sortea los turnos uno a uno</span>
+                  </button>
+
+                  <button 
+                    onClick={handleQuickDraw}
+                    className="bg-slate-900 hover:bg-slate-800 text-white py-5 px-8 rounded-2xl shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-2 max-w-xs w-full"
+                  >
+                    <Icon name="Shuffle" className="w-8 h-8 text-indigo-400" />
+                    <span className="text-lg font-bold">Sorteo Rápido</span>
+                    <span className="text-xs text-slate-300">Genera todos los turnos al instante</span>
+                  </button>
+                </div>
+                <button onClick={onCancel} className="text-xs text-slate-400 font-semibold hover:text-slate-605">Cancelar y salir</button>
+              </div>
+            )}
+
+            {step === 'drawing' && (
+              <div className="text-center py-12 space-y-6 bg-slate-50 rounded-3xl border border-slate-100">
+                <div className="w-20 h-20 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 mx-auto border-2 border-indigo-100 animate-bounce">
+                  <span className="text-3xl font-display font-black">#{currentDrawingNumber}</span>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-slate-400 uppercase tracking-widest font-mono">Sorteando Turno Actual</p>
+                  <h3 className="text-2xl font-display font-black text-indigo-950 animate-pulse">{tickerName || 'Eligiendo...'}</h3>
+                </div>
+              </div>
+            )}
+
+            {step === 'completed' && (
+              <div className="space-y-6">
+                <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6 text-center space-y-2">
+                  <div className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center mx-auto shadow-sm shadow-emerald-500/20">
+                    <Icon name="Check" className="w-6 h-6" />
+                  </div>
+                  <h3 className="font-display font-bold text-emerald-950 text-lg">Sorteo Completado con Éxito</h3>
+                  <p className="text-xs text-emerald-700 max-w-sm mx-auto">Revisa la asignación de turnos a continuación y guarda la configuración definitiva del Sam.</p>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {draftTickets.map((t, idx) => (
+                    <div key={idx} className="bg-white border border-slate-100 shadow-sm p-4 rounded-2xl flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-mono font-bold text-xs">
+                        {idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-400 font-semibold block">Turno {idx + 1}</span>
+                        <h4 className="text-xs font-bold text-slate-900 truncate">{t ? t.participantName : '-'}</h4>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-4 pt-4 border-t border-slate-100">
+                  <button 
+                    onClick={round => {
+                      setDraftTickets(Array(totalTicketsCount).fill(null));
+                      setStep('intro');
+                    }}
+                    className="py-3 px-6 rounded-xl border border-slate-200 hover:bg-slate-50 font-semibold text-xs text-slate-700 flex items-center gap-1.5"
+                  >
+                    <Icon name="RotateCcw" className="w-4 h-4" /> Repetir Sorteo
+                  </button>
+                  <button 
+                    onClick={handleSave}
+                    className="flex-1 py-3 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-1.5"
+                  >
+                    Guardar y Activar Sam <Icon name="Check" className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Component: RoundDetails
+    function RoundDetails({ round, onUpdateRound, onBack, onDeleteRound }) {
+      const [activeTab, setActiveTab] = useState('matrix');
+      const [selectedPeriodNumber, setSelectedPeriodNumber] = useState(1);
+      const [copiedInvite, setCopiedInvite] = useState(false);
+
+      const totalTickets = round.tickets.length;
+      const totalPeriods = totalTickets;
+
+      const totalPaidCount = round.payments.filter(p => p.isPaid).length;
+      const totalPaymentsCount = round.payments.length;
+      const paidRatePercent = totalPaymentsCount > 0 ? Math.round((totalPaidCount / totalPaymentsCount) * 100) : 0;
+
+      const totalCollectedAmount = round.payments.filter(p => p.isPaid).reduce((sum, p) => sum + p.amount, 0);
+      const totalOwedAmount = round.payments.filter(p => !p.isPaid).reduce((sum, p) => sum + p.amount, 0);
+
+      const handleTogglePayment = (paymentId) => {
+        const updatedPayments = round.payments.map(p => {
+          if (p.id === paymentId) {
+            return {
+              ...p,
+              isPaid: !p.isPaid,
+              paymentDate: !p.isPaid ? new Date().toISOString().split('T')[0] : undefined
+            };
+          }
+          return p;
+        });
+
+        const allPaid = updatedPayments.every(p => p.isPaid);
+        const hasUncollectedPayout = round.periods.some(per => !per.isPayoutDelivered);
+        const newStatus = (allPaid && !hasUncollectedPayout) ? RoundStatus.COMPLETED : RoundStatus.ACTIVE;
+
+        onUpdateRound({
+          ...round,
+          payments: updatedPayments,
+          status: newStatus
+        });
+      };
+
+      const handleTogglePayoutDelivered = (periodNumber) => {
+        const updatedPeriods = round.periods.map(per => {
+          if (per.number === periodNumber) {
+            return { ...per, isPayoutDelivered: !per.isPayoutDelivered };
+          }
+          return per;
+        });
+
+        const allPaid = round.payments.every(p => p.isPaid);
+        const allPayoutsDelivered = updatedPeriods.every(per => per.isPayoutDelivered);
+        const newStatus = (allPaid && allPayoutsDelivered) ? RoundStatus.COMPLETED : RoundStatus.ACTIVE;
+
+        onUpdateRound({
+          ...round,
+          periods: updatedPeriods,
+          status: newStatus
+        });
+      };
+
+      const handleMarkAllPeriodAsPaid = (periodNumber) => {
+        const updatedPayments = round.payments.map(p => {
+          if (p.periodNumber === periodNumber) {
+            return {
+              ...p,
+              isPaid: true,
+              paymentDate: new Date().toISOString().split('T')[0]
+            };
+          }
+          return p;
+        });
+
+        onUpdateRound({
+          ...round,
+          payments: updatedPayments
+        });
+      };
+
+      const handleCopyShareUrl = () => {
+        try {
+          const shareUrl = `${window.location.origin}${window.location.pathname}?roundId=${round.id}`;
+          
+          navigator.clipboard.writeText(shareUrl).then(() => {
+            setCopiedInvite(true);
+            setTimeout(() => setCopiedInvite(false), 2000);
+          });
+        } catch(e) {
+          alert("Error generando enlace.");
+        }
+      };
+
+      const currentPeriodPayments = round.payments.filter(p => p.periodNumber === selectedPeriodNumber);
+      const currentPeriod = round.periods.find(per => per.number === selectedPeriodNumber);
+      const currentPeriodPaidCount = currentPeriodPayments.filter(p => p.isPaid).length;
+
+      const participantStats = round.participants.map(p => {
+        const pTickets = round.tickets.filter(t => t.participantId === p.id);
+        const pTicketIds = pTickets.map(t => t.id);
+        
+        const pPayments = round.payments.filter(pay => pay.participantId === p.id);
+        const paidCount = pPayments.filter(pay => pay.isPaid).length;
+        const totalCount = pPayments.length;
+        
+        const amountPaid = pPayments.filter(pay => pay.isPaid).reduce((sum, pay) => sum + pay.amount, 0);
+        const amountOwed = pPayments.filter(pay => !pay.isPaid).reduce((sum, pay) => sum + pay.amount, 0);
+
+        const payoutTurns = round.periods.filter(per => pTicketIds.includes(per.beneficiaryTicketId));
+        const nextPayoutTurn = payoutTurns.find(per => !per.isPayoutDelivered);
+
+        return {
+          ...p,
+          tickets: pTickets,
+          paidCount,
+          totalCount,
+          amountPaid,
+          amountOwed,
+          payoutTurns,
+          nextPayoutTurn
+        };
+      });
+
+      return (
+        <div className="space-y-6">
+          
+          {/* Header Action Bar */}
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+            <button 
+              onClick={onBack}
+              className="inline-flex items-center gap-1.5 text-xs text-slate-550 hover:text-slate-900 font-semibold self-start"
+            >
+              <Icon name="ArrowLeft" className="w-4 h-4" /> Volver a Rondas
+            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={handleCopyShareUrl}
+                className="bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100 font-semibold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5"
+              >
+                <Icon name="Share2" className="w-4 h-4" />
+                {copiedInvite ? '¡Enlace Copiado!' : 'Copiar Enlace para Compartir'}
+              </button>
+              <button 
+                onClick={() => onDeleteRound(round.id)}
+                className="bg-rose-50 border border-rose-100 text-rose-700 hover:bg-rose-100 font-semibold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5"
+              >
+                <Icon name="Trash2" className="w-4 h-4" /> Eliminar
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Info Grid */}
+          <div className="bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-850 rounded-3xl text-white p-6 sm:p-8 relative overflow-hidden">
+            <div className="absolute right-0 bottom-0 opacity-5 pointer-events-none transform translate-y-12 translate-x-12">
+              <Icon name="Coins" className="w-72 h-72" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 relative z-10">
+              <div className="space-y-1">
+                <span className="text-[10px] text-indigo-200 uppercase tracking-widest font-mono">Nombre del Sam</span>
+                <h2 className="text-xl font-display font-bold leading-tight">{round.name}</h2>
+                <span className="inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-indigo-800 text-indigo-100 border border-indigo-700 uppercase tracking-wider">{round.status}</span>
+              </div>
+
+              <div className="grid grid-cols-2 col-span-3 gap-6 border-t md:border-t-0 md:border-l border-indigo-800/40 pt-6 md:pt-0 md:pl-6">
+                <div>
+                  <span className="text-[10px] text-indigo-305 font-semibold uppercase tracking-wider block mb-1">Monto del Pozo</span>
+                  <h3 className="text-2xl font-display font-black">${round.totalAmount.toLocaleString()}</h3>
+                  <span className="text-[10px] text-indigo-200/80">Cuota: ${round.contributionPerTicket} por cupo</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-indigo-305 font-semibold uppercase tracking-wider block mb-1">Estado de Ahorros</span>
+                  <h3 className="text-2xl font-display font-black text-emerald-400">${totalCollectedAmount.toLocaleString()}</h3>
+                  <span className="text-[10px] text-indigo-200/80">Pendiente: ${totalOwedAmount.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-slate-200 gap-6 text-sm font-semibold">
+            <button 
+              onClick={() => setActiveTab('matrix')}
+              className={`pb-3 border-b-2 transition-all ${activeTab === 'matrix' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-650'}`}
+            >
+              Matriz de Pagos
+            </button>
+            <button 
+              onClick={() => setActiveTab('periods')}
+              className={`pb-3 border-b-2 transition-all ${activeTab === 'periods' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-650'}`}
+            >
+              Periodos e Hitos
+            </button>
+            <button 
+              onClick={() => setActiveTab('participants')}
+              className={`pb-3 border-b-2 transition-all ${activeTab === 'participants' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-650'}`}
+            >
+              Participantes ({round.participants.length})
+            </button>
+          </div>
+
+          {/* Tab: Matrix */}
+          {activeTab === 'matrix' && (
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-105 text-slate-405 font-bold uppercase tracking-wider">
+                      <th className="px-6 py-4">Cupo / Propietario</th>
+                      {round.periods.map(per => (
+                        <th key={per.number} className="px-4 py-4 text-center min-w-[100px]">
+                          <div>Turno {per.number}</div>
+                          <div className="text-[10px] text-slate-400 font-mono font-medium">{formatLocalDateShort(per.paymentDate)}</div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {round.tickets.map(ticket => (
+                      <tr key={ticket.id} className="hover:bg-slate-50/50">
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-slate-900">{ticket.participantName}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">Nº {ticket.number}</div>
+                        </td>
+                        {round.periods.map(per => {
+                          const payment = round.payments.find(pay => pay.periodNumber === per.number && pay.ticketId === ticket.id);
+                          if (!payment) return <td key={per.number} className="text-center">-</td>;
+                          return (
+                            <td key={per.number} className="px-4 py-4 text-center">
+                              <button
+                                onClick={() => handleTogglePayment(payment.id)}
+                                className={`px-3 py-1.5 rounded-lg border text-[10px] font-bold tracking-wide transition-all ${
+                                  payment.isPaid 
+                                    ? 'bg-emerald-50 border-emerald-250 text-emerald-700 shadow-sm shadow-emerald-500/5'
+                                    : 'bg-rose-50 border-rose-250 text-rose-700 hover:bg-rose-100/50'
+                                }`}
+                              >
+                                {payment.isPaid ? 'PAGADO' : 'PENDIENTE'}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Tab: Periods */}
+          {activeTab === 'periods' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              {/* Period selection list */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 space-y-2 h-96 overflow-y-auto">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block px-2 mb-2">Selecciona un Periodo</span>
+                {round.periods.map(per => {
+                  const isWinnerPaid = round.payments.filter(pay => pay.periodNumber === per.number).every(pay => pay.isPaid);
+                  return (
+                    <button
+                      key={per.number}
+                      onClick={() => setSelectedPeriodNumber(per.number)}
+                      className={`w-full text-left p-3.5 rounded-2xl border text-xs font-semibold flex items-center justify-between transition-all ${
+                        selectedPeriodNumber === per.number 
+                          ? 'bg-indigo-50 border-indigo-200 text-indigo-950' 
+                          : 'bg-white border-slate-100 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="font-bold">Periodo {per.number} ({formatLocalDateShort(per.paymentDate)})</div>
+                        <div className="text-[10px] text-slate-400">Beneficiario: {per.beneficiaryName}</div>
+                      </div>
+                      {isWinnerPaid && <Icon name="CheckCircle" className="w-4 h-4 text-emerald-500" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Selected Period Detail */}
+              {currentPeriod && (
+                <div className="col-span-2 bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-start border-b border-slate-100 pb-5 gap-3">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-mono font-bold">Turno de Cobro Seleccionado</span>
+                      <h3 className="text-lg font-display font-black text-slate-900">Periodo #{currentPeriod.number} - {formatLocalDate(currentPeriod.paymentDate)}</h3>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleMarkAllPeriodAsPaid(currentPeriod.number)}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md flex items-center gap-1.5"
+                      >
+                        Marcar Todo Pagado
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Beneficiary Card */}
+                  <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/30 border border-indigo-100 rounded-3xl p-5 flex justify-between items-center gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-display font-black text-lg shadow-md shadow-indigo-600/10">
+                        {currentPeriod.number}
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-indigo-600 uppercase tracking-wider font-semibold">Beneficiario del Turno</span>
+                        <h4 className="font-bold text-indigo-950 text-base">{currentPeriod.beneficiaryName}</h4>
+                      </div>
+                    </div>
+
+                    <div>
+                      <button
+                        onClick={() => handleTogglePayoutDelivered(currentPeriod.number)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 ${
+                          currentPeriod.isPayoutDelivered 
+                            ? 'bg-emerald-500 hover:bg-emerald-600 text-white' 
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        }`}
+                      >
+                        <Icon name="Check" className="w-4 h-4" />
+                        {currentPeriod.isPayoutDelivered ? 'Pozo Entregado' : 'Entregar Pozo'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Period contributions list */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider">Aportes del Periodo ({currentPeriodPaidCount}/{totalTickets})</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {currentPeriodPayments.map(pay => (
+                        <div 
+                          key={pay.id}
+                          onClick={() => handleTogglePayment(pay.id)}
+                          className={`p-4 border rounded-2xl flex justify-between items-center cursor-pointer transition-all ${
+                            pay.isPaid 
+                              ? 'bg-emerald-50/50 border-emerald-100 hover:border-emerald-200 text-emerald-950' 
+                              : 'bg-slate-50 border-slate-100 hover:border-slate-205 text-slate-605'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <h5 className="font-bold text-xs truncate">{pay.participantName}</h5>
+                            <span className="text-[9px] font-mono text-slate-400 block">Cuota: ${pay.amount}</span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pay.isPaid ? 'bg-emerald-100 text-emerald-800 border border-emerald-250' : 'bg-rose-100 text-rose-800 border border-rose-250'}`}>
+                            {pay.isPaid ? 'Pagó' : 'Pendiente'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab: Participants */}
+          {activeTab === 'participants' && (
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 overflow-hidden">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                    <th className="px-6 py-4">Nombre</th>
+                    <th className="px-6 py-4 text-center">Nº Cupos</th>
+                    <th className="px-6 py-4 text-center">Turnos Cobrados</th>
+                    <th className="px-6 py-4 text-right">Aportado</th>
+                    <th className="px-6 py-4 text-right">Pendiente</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {participantStats.map(stat => {
+                    const deliveredPayoutCount = stat.payoutTurns.filter(per => per.isPayoutDelivered).length;
+                    return (
+                      <tr key={stat.id} className="hover:bg-slate-50/50">
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-slate-900">{stat.name}</div>
+                        </td>
+                        <td className="px-6 py-4 text-center font-mono font-bold text-slate-800">{stat.ticketsCount}</td>
+                        <td className="px-6 py-4 text-center font-mono">
+                          {deliveredPayoutCount} / {stat.payoutTurns.length}
+                        </td>
+                        <td className="px-6 py-4 text-right font-mono font-bold text-emerald-600">${stat.amountPaid.toLocaleString()}</td>
+                        <td className="px-6 py-4 text-right font-mono font-bold text-rose-500">${stat.amountOwed.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    // Mount App
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
