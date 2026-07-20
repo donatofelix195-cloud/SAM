@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rounds/{roundId} {
+      // Permitir lectura y escritura pública para facilitar el desarrollo y evitar errores de permisos
+      allow read, write: if true;
+    }
+  }
+}
