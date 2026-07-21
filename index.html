@@ -334,24 +334,20 @@
         return () => window.removeEventListener('beforeinstallprompt', handler);
       }, []);
 
-      // Cargar e Inicializar base de datos Firestore en Tiempo Real (espera auth)
+      // Cargar e Inicializar base de datos Firestore en Tiempo Real (sin esperar auth - reglas públicas)
       useEffect(() => {
-        let unsubscribe = null;
-        
-        authReady.then(() => {
-          unsubscribe = db.collection('rounds').onSnapshot((snapshot) => {
-            const serverRounds = [];
-            snapshot.forEach(doc => {
-              serverRounds.push({ id: doc.id, ...doc.data() });
-            });
-            setRounds(serverRounds);
-            localStorage.setItem('sams_rounds_data', JSON.stringify(serverRounds));
-          }, (err) => {
-            console.error("Error cargando de Firestore:", err);
+        const unsubscribe = db.collection('rounds').onSnapshot((snapshot) => {
+          const serverRounds = [];
+          snapshot.forEach(doc => {
+            serverRounds.push({ id: doc.id, ...doc.data() });
           });
+          setRounds(serverRounds);
+          localStorage.setItem('sams_rounds_data', JSON.stringify(serverRounds));
+        }, (err) => {
+          console.error("Error cargando de Firestore:", err);
         });
 
-        return () => { if (unsubscribe) unsubscribe(); };
+        return () => unsubscribe();
       }, []);
 
       // Load user profile & handle initial URL routing on mount
@@ -372,9 +368,8 @@
         }
         setRounds(initialRounds);
 
-        // Esperar auth y luego sincronizar con Firestore
+        // Auto-sanación: subir rondas locales faltantes (espera auth para escribir)
         authReady.then(() => {
-          // Auto-sanación: subir rondas locales faltantes
           db.collection('rounds').get().then((snapshot) => {
             const serverIds = [];
             snapshot.forEach(doc => serverIds.push(doc.id));
@@ -391,39 +386,41 @@
                 }
               }
             });
-          });
+          }).catch(err => console.error("Error en auto-sanación:", err));
+        });
 
-          // Enrutamiento de link con ?roundId=
-          if (roundIdParam) {
-            db.collection('rounds').doc(roundIdParam).get().then((docSnap) => {
-              if (docSnap.exists) {
-                const foundRound = { id: docSnap.id, ...docSnap.data() };
-                if (foundRound.status === RoundStatus.DRAFT) {
-                  const savedUserProfile = savedUser ? JSON.parse(savedUser) : null;
-                  const userName = savedUserProfile ? savedUserProfile.name : '';
-                  const userExists = foundRound.participants?.some(p => p.name.trim().toLowerCase() === userName.trim().toLowerCase());
-                  
-                  if (userExists) {
-                    setDraftRound(foundRound);
-                    setView('raffle');
-                  } else {
-                    setImportedRound(foundRound);
-                    setView('import');
-                  }
+        // Enrutamiento DIRECTO de link con ?roundId= (NO espera auth - reglas públicas)
+        if (roundIdParam) {
+          console.log("Buscando Sam compartido con ID:", roundIdParam);
+          db.collection('rounds').doc(roundIdParam).get().then((docSnap) => {
+            if (docSnap.exists) {
+              const foundRound = { id: docSnap.id, ...docSnap.data() };
+              console.log("Sam encontrado:", foundRound.name);
+              if (foundRound.status === RoundStatus.DRAFT) {
+                const savedUserProfile = savedUser ? JSON.parse(savedUser) : null;
+                const userName = savedUserProfile ? savedUserProfile.name : '';
+                const userExists = foundRound.participants?.some(p => p.name.trim().toLowerCase() === userName.trim().toLowerCase());
+                
+                if (userExists) {
+                  setDraftRound(foundRound);
+                  setView('raffle');
                 } else {
-                  // Sam activo/completado - mostrar directamente
                   setImportedRound(foundRound);
                   setView('import');
                 }
               } else {
-                alert("El Sam especificado no existe o fue eliminado.");
+                // Sam activo/completado - mostrar directamente
+                setImportedRound(foundRound);
+                setView('import');
               }
-            }).catch(err => {
-              console.error("Error buscando ronda en Firestore:", err);
-              alert("Error conectando con la base de datos: " + (err.message || err.toString()));
-            });
-          }
-        });
+            } else {
+              alert("El Sam especificado no existe o fue eliminado.");
+            }
+          }).catch(err => {
+            console.error("Error buscando ronda en Firestore:", err);
+            alert("Error conectando con la base de datos: " + (err.code || '') + " " + (err.message || err.toString()));
+          });
+        }
 
         // Detección legacy import (?import=)
         const importData = params.get('import');
