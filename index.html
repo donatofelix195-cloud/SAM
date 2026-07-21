@@ -420,7 +420,7 @@
               }
             }).catch(err => {
               console.error("Error buscando ronda en Firestore:", err);
-              alert("Error conectando con la base de datos. Intenta de nuevo.");
+              alert("Error conectando con la base de datos: " + (err.message || err.toString()));
             });
           }
         });
